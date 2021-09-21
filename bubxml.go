@@ -29,5 +29,26 @@ func NewAdapter(revi Revicer) {
 	return &Adapter{depth: -1, breadth: -1, revicer: revi}
 }
 
-func doParse(r io.Reader) {
+func (a *Adapter) init() {
+	a.depth = 0
+	a.breadth = 0
+}
+
+func (a *Adapter) depthPlus() {
+	a.depth++
+}
+
+func (a *Adapter) depthMinus() {
+	a.depth--
+}
+
+func (a *Adapter) breadthPlus() {
+	a.breadth++
+}
+
+func (a *Adapter) breadthMinus() {
+	a.breadth--
+}
+
+func (a *Adapter) DoParse(r io.Reader) {
 }
