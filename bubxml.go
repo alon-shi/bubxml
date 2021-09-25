@@ -31,6 +31,8 @@ type Adapter struct {
 	revicer        Revicer
 	stack          list.List
 	leafMap        map[string]string
+	body           chan Branch
+	done           chan string
 }
 
 func NewAdapter(revi Revicer) {
@@ -41,6 +43,8 @@ func (a *Adapter) init() {
 	a.depth = 0
 	a.breadth = 0
 	a.stack = list.New()
+	a.body = make(chan Branch)
+	a.done = make(chan string)
 }
 
 func (a *Adapter) depthPlus() {
@@ -70,7 +74,29 @@ func (a *Adapter) isBreadthReseted() bool {
 	return a.breadth == 1
 }
 
-func (a *Adapter) DoParse(r io.Reader) {
+func (a *Adapter) DeCode(r io.Reader) {
+	go doParse(r)
+	defer a.finally()
+outer:
+	for {
+		select {
+		case msg <- a.body:
+			a.revicer.Push(msg)
+		case <-a.done:
+			break outer
+		}
+	}
+}
+
+func (a *Adapter) finally() {
+	a.depth = -1
+	a.breadth = -1
+	a.stack = nil
+	close(a.body)
+	close(a.done)
+}
+
+func (a *Adapter) doParse(r io.Reader) {
 	decoder := xml.NewDecoder(r)
 	for tk, err = decoder.Token(); err == nil; tk, err = decoder.Token() {
 		switch token := t.(type) {
@@ -88,6 +114,7 @@ func (a *Adapter) DoParse(r io.Reader) {
 }
 
 func (a *Adapter) prefix(token xml.StartElement) {
+
 }
 
 func (a *Adapter) infix(token xml.CharData) {
