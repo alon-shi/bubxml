@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-type Branch struct {
+type Container struct {
 	Name       string
 	Attributes map[string]string
 	Leafs      []Leaf
@@ -18,7 +18,7 @@ type Leaf struct {
 }
 
 type Revicer interface {
-	Push(node *Branch) error
+	Push(node *Container) error
 }
 
 type tnode struct {
@@ -30,8 +30,8 @@ type Adapter struct {
 	depth, breadth int
 	revicer        Revicer
 	stack          list.List
-	leafMap        map[string]string
-	body           chan Branch
+	leafMap        map[int][]Leaf
+	body           chan Container
 	done           chan string
 }
 
@@ -43,7 +43,8 @@ func (a *Adapter) init() {
 	a.depth = 0
 	a.breadth = 0
 	a.stack = list.New()
-	a.body = make(chan Branch)
+	a.leafMap = make(map[int][]Leaf, 0)
+	a.body = make(chan Container)
 	a.done = make(chan string)
 }
 
@@ -74,7 +75,27 @@ func (a *Adapter) isBreadthReseted() bool {
 	return a.breadth == 1
 }
 
-func (a *Adapter) DeCode(r io.Reader) {
+func (a *Adapter) pushNode(t *tnode) {
+	a.stack.PushBack(t)
+}
+
+func (a *Adapter) getTopNode() *tnode {
+	last := a.stack.Back()
+	node, _ := last.Value.(*tnode)
+	return node
+}
+
+func (a *Adapter) popNode() *tnode {
+	last := a.stack.back()
+	node, err := last.Value.(*tnode)
+	if err == nil {
+		a.stack.Remove(last)
+		return node
+	}
+	return nil
+}
+
+func (a *Adapter) DeCoder(r io.Reader) {
 	go doParse(r)
 	defer a.finally()
 outer:
@@ -111,15 +132,54 @@ func (a *Adapter) doParse(r io.Reader) {
 
 		}
 	}
+	a.done <- "done"
 }
 
 func (a *Adapter) prefix(token xml.StartElement) {
-
+	a.depthPlus()
+	a.breadthReset()
+	a.pushNode(anode{name: token.Name.Local, attrs: getAttributes(token.Attr)})
 }
 
 func (a *Adapter) infix(token xml.CharData) {
-
+	if a.isBreadthReseted() {
+		a.breadthPlus()
+		node := a.getTopeNode()
+		node.value = token.CharData
+	}
 }
 
 func (a *Adapter) subfix(token xml.EndElement) {
+	a.breadthPlus()
+	if a.isLeaf() {
+		a.depthMinus()
+		a.appendLeaf(a.popNode())
+	} else {
+		n := a.popNode()
+		c := Container{Name: n.name, Attributes: n.attrs, Leafs: a.leafMap[a.depth]}
+		a.body <- c
+		remove(a.leafMap, a.depth)
+		a.depthMinus()
+	}
+
+}
+
+func (a *Adapter) appendLeaf(n *tnode) {
+	leaf := Leaf{name: n.name, value: n.value}
+	if l, ok := a.leafMap[a.depth]; ok {
+		l = append(l, leaf)
+		a.leafMap[a.depth] = l
+	} else {
+		ls = make([]Leaf, 0)
+		ls = append(ls, leaf)
+		a.leafMap[a.depth] = ls
+	}
+}
+
+func getAttributes(attr []xml.Attr) map[string]string {
+	attrs := make(map[string]string, 0)
+	for _, a := range attr {
+		attrs[a.Name.Local] = a.Value
+	}
+	return attrs
 }
