@@ -18,7 +18,7 @@ type Leaf struct {
 }
 
 type Revicer interface {
-	Push(node *Container) error
+	Push(node Container) error
 }
 
 type tnode struct {
@@ -29,13 +29,13 @@ type tnode struct {
 type Adapter struct {
 	depth, breadth int
 	revicer        Revicer
-	stack          list.List
+	stack          *list.List
 	leafMap        map[int][]Leaf
 	body           chan Container
 	done           chan string
 }
 
-func NewAdapter(revi Revicer) {
+func NewAdapter(revi Revicer) *Adapter {
 	return &Adapter{depth: -1, breadth: -1, revicer: revi}
 }
 
@@ -86,9 +86,9 @@ func (a *Adapter) getTopNode() *tnode {
 }
 
 func (a *Adapter) popNode() *tnode {
-	last := a.stack.back()
-	node, err := last.Value.(*tnode)
-	if err == nil {
+	last := a.stack.Back()
+	node, ok := last.Value.(*tnode)
+	if ok {
 		a.stack.Remove(last)
 		return node
 	}
@@ -96,12 +96,13 @@ func (a *Adapter) popNode() *tnode {
 }
 
 func (a *Adapter) DeCoder(r io.Reader) {
-	go doParse(r)
+	a.init()
+	go a.doParse(r)
 	defer a.finally()
 outer:
 	for {
 		select {
-		case msg <- a.body:
+		case msg := <-a.body:
 			a.revicer.Push(msg)
 		case <-a.done:
 			break outer
@@ -119,8 +120,8 @@ func (a *Adapter) finally() {
 
 func (a *Adapter) doParse(r io.Reader) {
 	decoder := xml.NewDecoder(r)
-	for tk, err = decoder.Token(); err == nil; tk, err = decoder.Token() {
-		switch token := t.(type) {
+	for tk, err := decoder.Token(); err == nil; tk, err = decoder.Token() {
+		switch token := tk.(type) {
 		case xml.StartElement:
 			a.prefix(token)
 		case xml.CharData:
@@ -138,14 +139,14 @@ func (a *Adapter) doParse(r io.Reader) {
 func (a *Adapter) prefix(token xml.StartElement) {
 	a.depthPlus()
 	a.breadthReset()
-	a.pushNode(anode{name: token.Name.Local, attrs: getAttributes(token.Attr)})
+	a.pushNode(&tnode{name: token.Name.Local, attrs: getAttributes(token.Attr)})
 }
 
 func (a *Adapter) infix(token xml.CharData) {
 	if a.isBreadthReseted() {
 		a.breadthPlus()
-		node := a.getTopeNode()
-		node.value = token.CharData
+		node := a.getTopNode()
+		node.value = string([]byte(token))
 	}
 }
 
@@ -158,19 +159,19 @@ func (a *Adapter) subfix(token xml.EndElement) {
 		n := a.popNode()
 		c := Container{Name: n.name, Attributes: n.attrs, Leafs: a.leafMap[a.depth]}
 		a.body <- c
-		remove(a.leafMap, a.depth)
+		delete(a.leafMap, a.depth)
 		a.depthMinus()
 	}
 
 }
 
 func (a *Adapter) appendLeaf(n *tnode) {
-	leaf := Leaf{name: n.name, value: n.value}
+	leaf := Leaf{Name: n.name, Text: n.value}
 	if l, ok := a.leafMap[a.depth]; ok {
 		l = append(l, leaf)
 		a.leafMap[a.depth] = l
 	} else {
-		ls = make([]Leaf, 0)
+		ls := make([]Leaf, 0)
 		ls = append(ls, leaf)
 		a.leafMap[a.depth] = ls
 	}
